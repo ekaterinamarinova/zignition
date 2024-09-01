@@ -13,8 +13,8 @@ pub fn main() !void {
     const read_len = try client.readAll(&buffer);
 
     if (read_len <= 0) {
-        std.debug.print("Error reading into buffer", .{});
+        log.print("Error reading into buffer", .{});
     }
 
-    std.debug.print("Read bytes: {s}", .{buffer[0..read_len]});
+    log.print("Read bytes: {s}", .{buffer[0..read_len]});
 }

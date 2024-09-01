@@ -28,7 +28,7 @@ pub const CanNode = struct {
     receiveErrorCount: u8,
 
     pub fn init(isErrorActive: bool, isErrorPassive: bool, isBusOff: bool, transmitErrorCount: u8, receiveErrorCount: u8) CanNode {
-        const node = CanNode{
+        const node = CanNode {
             .isErrorActive = isErrorActive,
             .isErrorPassive = isErrorPassive,
             .isBusOff = isBusOff,
