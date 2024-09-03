@@ -1,4 +1,27 @@
 const std = @import("std");
+const net = std.net;
+const server = @import("tcp/server.zig");
+const debug = std.debug;
+
+var Mutex = std.Thread.Mutex{};
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
+
+pub fn main() !void {
+    // Initialize an instance of CanDataFrame
+    const dataFrame =
+    CanDataFrame.init(0x00, 0x7FF, 0b0000_0100, &[_]u16{ 0b01010101, 0x55, 0x03, 0x04 }, 0x07, 0x00, 0b01111111);
+    const crc: u16 = dataFrame.calculateCRC();
+    std.debug.print("CRC: {x}\n", .{crc});
+
+    // const bus = try allocator.create(VirtualBus);
+    // defer allocator.destroy(bus);
+
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+
+    try start(8080, "127.0.0.1", &buffer);
+}
 
 pub const VirtualBus = struct {
     nodes: []const CanNode,
@@ -18,7 +41,95 @@ pub const VirtualBus = struct {
 
         return bus;
     }
+
+    pub fn sendFrame() void {
+        // Send a data frame
+        // server.write(, bytes: []const u8)
+    }
 };
+
+pub fn start(port: u16, address: []const u8, buff: *std.ArrayList(u8)) !void {
+    // Start the virtual bus server
+    var addr = try net.Address.parseIp4(address, port);
+    debug.print("Using address with ip: {s}, port: {d}\n", .{address, port});
+
+    var options = net.Address.ListenOptions {
+        .kernel_backlog = 128,
+        .reuse_address = true,
+        .reuse_port = true,
+        .force_nonblocking = true,
+    };
+
+    var s: net.Server = try server.create(&addr, &options);
+    defer s.deinit();
+
+
+    while (true) {
+        debug.print("Listening for connections...\n", .{});
+        var client: net.Server.Connection = retry(&s);
+
+        const thread = try std.Thread.spawn(
+            .{},
+            handleClient,
+            .{buff, &client} //TODO add thread id
+        );
+
+        thread.detach();
+    }
+}
+
+
+fn retry(s: *net.Server) net.Server.Connection {
+    var conn: ?net.Server.Connection = null;
+    while (true) {
+        if (conn != null) {
+            return conn.?;
+        }
+
+        conn = s.accept() catch |err| {
+            if (err == error.WouldBlock) {
+                std.time.sleep(1 * std.time.ns_per_ms);
+                continue;
+            } else {
+                return conn.?;
+            }
+        };
+    }
+}
+
+pub fn handleClient(
+    buff: *std.ArrayList(u8),
+    client: *net.Server.Connection
+) !void {
+    debug.print("Accepted connection from client..\n", .{});
+    debug.print("Writing to the open stream...\n", .{});
+    const w_size = try client.stream.write("Hello, World!\n");
+
+    if (w_size == 0) {
+        debug.print("Nothing to write.\n", .{});
+    }
+
+    Mutex.lock();
+    defer Mutex.unlock();
+
+    const r_bytes = try server.read(&client.stream, buff);
+
+    if (r_bytes == buff.capacity) {
+        debug.print("Buffer is full!\n", .{});
+    }
+
+    if (r_bytes > 0) {
+        debug.print("Read bytes from client: {s}\n", .{buff.items});
+    }
+
+    if (r_bytes < buff.capacity) {
+        debug.print("Reached end of stream.\n", .{});
+    }
+
+    // Handle buffer after reading
+    // Build frame
+}
+
 
 pub const CanNode = struct {
     isErrorActive: bool,
@@ -36,6 +147,22 @@ pub const CanNode = struct {
             .receiveErrorCount = receiveErrorCount,
         };
         return node;
+    }
+
+    pub fn connect() void {
+        // Connect to the bus
+    }
+
+    pub fn disconnect() void {
+        // Disconnect from the bus
+    }
+
+    pub fn sendFrame() void {
+        // Send a data frame
+    }
+
+    pub fn receiveFrame() void {
+        // Receive a data frame
     }
 };
 
@@ -156,11 +283,4 @@ pub const CanInterframeSpacing = struct {
     }
 };
 
-pub fn main() !void {
-    // Initialize an instance of CanDataFrame
-    const dataFrame =
-        CanDataFrame.init(0x00, 0x7FF, 0b0000_0100, &[_]u16{ 0b01010101, 0x55, 0x03, 0x04 }, 0x07, 0x00, 0b01111111);
-    const crc: u16 = dataFrame.calculateCRC();
 
-    std.debug.print("CRC: {x}\n", .{crc});
-}
