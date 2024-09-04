@@ -15,13 +15,13 @@ pub fn write(stream: net.Stream, bytes: []const u8) !void {
     try stdout.writeAll(bytes);
 }
 
-pub fn read(stream: *net.Stream, buffer: *std.ArrayList(u8)) !usize {
+pub fn read(stream: net.Stream, buffer: *std.ArrayList(u8)) !usize {
     debug.print("Reading from client.. \n", .{});
 
     const temp: []u8 = try allocator.alloc(u8, 100);
     defer allocator.free(temp);
 
-    const re = try stream.*.readAll(temp);
+    const re = try stream.readAll(temp);
     _ = &re;
 
     try buffer.appendSlice(temp);
