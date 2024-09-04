@@ -7,6 +7,8 @@ var Mutex = std.Thread.Mutex{};
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 
+var activeConnections = std.ArrayList(net.Server.Connection).init(allocator);
+
 pub fn main() !void {
     // Initialize an instance of CanDataFrame
     const dataFrame =
@@ -51,8 +53,7 @@ pub const VirtualBus = struct {
 pub fn start(port: u16, address: []const u8, buff: *std.ArrayList(u8)) !void {
     // Start the virtual bus server
     var addr = try net.Address.parseIp4(address, port);
-    debug.print("Using address with ip: {s}, port: {d}\n", .{address, port});
-
+    debug.print("[main] Using address with ip: {s}, port: {d}\n", .{address, port});
     var options = net.Address.ListenOptions {
         .kernel_backlog = 128,
         .reuse_address = true,
@@ -62,16 +63,22 @@ pub fn start(port: u16, address: []const u8, buff: *std.ArrayList(u8)) !void {
 
     var s: net.Server = try server.create(&addr, &options);
     defer s.deinit();
-
+    var threadId: isize = 0;
 
     while (true) {
-        debug.print("Listening for connections...\n", .{});
+        debug.print("[main] Listening for connections...\n", .{});
         var client: net.Server.Connection = retry(&s);
+        _ = &client;
+
+        debug.print("[main] Client with address {any} connected, adding active connection..\n", .{client.address});
+        try activeConnections.append(client);
+        debug.print("[main] Active connections: {any}\n", .{activeConnections.items});
+        threadId += 1;
 
         const thread = try std.Thread.spawn(
             .{},
             handleClient,
-            .{buff, &client} //TODO add thread id
+            .{buff, client, threadId}
         );
 
         thread.detach();
@@ -99,10 +106,11 @@ fn retry(s: *net.Server) net.Server.Connection {
 
 pub fn handleClient(
     buff: *std.ArrayList(u8),
-    client: *net.Server.Connection
+    client: net.Server.Connection,
+    threadId: isize
 ) !void {
-    debug.print("Accepted connection from client..\n", .{});
-    debug.print("Writing to the open stream...\n", .{});
+    debug.print("[Thread-{d}] Accepted connection from client..\n", .{threadId});
+    debug.print("[Thread-{d}] Writing to the open stream...\n", .{threadId});
     const w_size = try client.stream.write("Hello, World!\n");
 
     if (w_size == 0) {
@@ -112,18 +120,18 @@ pub fn handleClient(
     Mutex.lock();
     defer Mutex.unlock();
 
-    const r_bytes = try server.read(&client.stream, buff);
+    const r_bytes = try server.read(client.stream, buff);
 
     if (r_bytes == buff.capacity) {
-        debug.print("Buffer is full!\n", .{});
+        debug.print("[Thread-{d}] Buffer is full!\n", .{threadId});
     }
 
     if (r_bytes > 0) {
-        debug.print("Read bytes from client: {s}\n", .{buff.items});
+        debug.print("[Thread-{d}] Read bytes from client: {s}\n", .{threadId, buff.items});
     }
 
     if (r_bytes < buff.capacity) {
-        debug.print("Reached end of stream.\n", .{});
+        debug.print("[Thread-{d}] Reached end of stream.\n", .{threadId});
     }
 
     // Handle buffer after reading
