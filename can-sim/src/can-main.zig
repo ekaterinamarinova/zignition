@@ -1,6 +1,5 @@
 const std = @import("std");
 const net = std.net;
-const server = @import("tcp/server.zig");
 const debug = std.debug;
 
 var Mutex = std.Thread.Mutex{};
@@ -11,17 +10,18 @@ var activeConnections = std.ArrayList(net.Server.Connection).init(allocator);
 
 pub fn main() !void {
     // Initialize an instance of CanDataFrame
-    const dataFrame =
-    CanDataFrame.init(0x00, 0x7FF, 0b0000_0100, &[_]u16{ 0b01010101, 0x55, 0x03, 0x04 }, 0x07, 0x00, 0b01111111);
-    const crc: u16 = dataFrame.calculateCRC();
-    std.debug.print("CRC: {x}\n", .{crc});
+    // const dataFrame =
+    // CanDataFrame.init(0x00, 0x7FF, 0b0000_0100, &[_]u16{ 0b01010101, 0x55, 0x03, 0x04 }, 0x07, 0x00, 0b01111111);
+    // const crc: u16 = dataFrame.calculateCRC();
+    // std.debug.print("CRC: {x}\n", .{crc});
 
     // const bus = try allocator.create(VirtualBus);
     // defer allocator.destroy(bus);
 
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.ArrayList(bool).init(allocator);
     defer buffer.deinit();
 
+    //TODO handle node reconnects, currently new thread is created on reconnect
     try start(8080, "127.0.0.1", &buffer);
 }
 
@@ -50,18 +50,18 @@ pub const VirtualBus = struct {
     }
 };
 
-pub fn start(port: u16, address: []const u8, buff: *std.ArrayList(u8)) !void {
+pub fn start(port: u16, address: []const u8, buff: *std.ArrayList(bool)) !void {
     // Start the virtual bus server
-    var addr = try net.Address.parseIp4(address, port);
+    const addr = try net.Address.parseIp4(address, port);
     debug.print("[main] Using address with ip: {s}, port: {d}\n", .{address, port});
-    var options = net.Address.ListenOptions {
+    const options = net.Address.ListenOptions {
         .kernel_backlog = 128,
         .reuse_address = true,
         .reuse_port = true,
         .force_nonblocking = true,
     };
 
-    var s: net.Server = try server.create(&addr, &options);
+    var s: net.Server = try net.Address.listen(addr, options);
     defer s.deinit();
     var threadId: isize = 0;
 
@@ -105,37 +105,68 @@ fn retry(s: *net.Server) net.Server.Connection {
 }
 
 pub fn handleClient(
-    buff: *std.ArrayList(u8),
+    buff: *std.ArrayList(bool),
     client: net.Server.Connection,
     threadId: isize
 ) !void {
     debug.print("[Thread-{d}] Accepted connection from client..\n", .{threadId});
-    debug.print("[Thread-{d}] Writing to the open stream...\n", .{threadId});
-    const w_size = try client.stream.write("Hello, World!\n");
 
-    if (w_size == 0) {
-        debug.print("Nothing to write.\n", .{});
+    while (true) {
+        // monitor buffer
+        var r_byte: u8 = 0;
+        debug.print("[Thread-{d}] Buffer content: {any}\n", .{threadId, buff.items});
+
+        if (buff.*.items.len == 0) {
+            debug.print("[Thread-{d}] Buffer is empty. Reading from client..\n", .{threadId});
+
+            // read a single byte and broadcast; nodes have responsibility to filter/handle/collect frames
+            r_byte = try client.stream.reader().readByte();
+
+            if (r_byte == buff.capacity) {
+                debug.print("[Thread-{d}] Buffer is full! {any}\n", .{threadId, buff.items});
+            }
+
+            if (r_byte == 0) {
+                debug.print("[Thread-{d}] Read dominant bit, adding to buffer. \n", .{threadId});
+                try buff.*.append(false);
+            }
+            
+            if (r_byte > 0) {
+                debug.print("[Thread-{d}] Read byte from client: {b}\n", .{threadId, r_byte});
+                try buff.*.append(true);
+            }
+
+            if (r_byte < buff.capacity) {
+                debug.print("[Thread-{d}] Reached end of stream.\n", .{threadId});
+            }
+
+            const isLocked = Mutex.tryLock();
+            if (isLocked) {
+                debug.print("[Thread-{d}] Mutex locked!\n", .{threadId});
+            }
+
+            for (activeConnections.items) |conn| {
+                if (conn.address.getPort() != client.address.getPort()) {
+                    debug.print("[Thread-{d}] Broadcasting to: {any}\n", .{threadId, conn.address});
+                    for (buff.items) |i| {
+
+                        if (i == true) {
+                            try conn.stream.writer().writeByte(1);
+                        } else {
+                            try conn.stream.writer().writeByte(0);
+                        }
+                    }
+
+                    //TODO check for ack and then clear?
+                    buff.clearRetainingCapacity();
+                }
+            }
+
+            // debug.print("[Thread-{d}] Buffer after processing: {any} \n", .{threadId, buff.items});
+            Mutex.unlock();
+        }
+
     }
-
-    Mutex.lock();
-    defer Mutex.unlock();
-
-    const r_bytes = try server.read(client.stream, buff);
-
-    if (r_bytes == buff.capacity) {
-        debug.print("[Thread-{d}] Buffer is full!\n", .{threadId});
-    }
-
-    if (r_bytes > 0) {
-        debug.print("[Thread-{d}] Read bytes from client: {s}\n", .{threadId, buff.items});
-    }
-
-    if (r_bytes < buff.capacity) {
-        debug.print("[Thread-{d}] Reached end of stream.\n", .{threadId});
-    }
-
-    // Handle buffer after reading
-    // Build frame
 }
 
 
@@ -174,6 +205,33 @@ pub const CanNode = struct {
     }
 };
 
+pub fn calculateCRC(data: []const u16) u16 {
+    const generatorPolynomial: u16 = 0x4599;
+    var crcRegister: u16 = 0;
+
+    for (data) |byte| {
+        // std.debug.print("byte: {x}\n", .{byte});
+        var count: u4 = 0;
+        for (0..8) |_| {
+            // debug.print("Inner loop: {}\n", .{count});
+            const next = (byte >> (7 - count)) & 1;
+            // debug.print("next: {}\n", .{next});
+            count = count + 1;
+
+            crcRegister = (crcRegister << 1) & 0x7FFF;
+            // debug.print("crcRegister after left shift and mask: {}\n", .{crcRegister});
+            if (next != 0) {
+                crcRegister ^= generatorPolynomial;
+            }
+        }
+    }
+
+    //add recessive bit delimiter at the end
+    crcRegister = (crcRegister << 1) | 1;
+    // std.debug.print("=crcRegister after loop: {}=\n", .{crcRegister});
+    return crcRegister;
+}
+
 pub const CanDataFrame = struct {
     // 1 dominant bit (0)
     sof: u8,
@@ -207,32 +265,7 @@ pub const CanDataFrame = struct {
         return frame;
     }
 
-    pub fn calculateCRC(self: @This()) u16 {
-        const generatorPolynomial: u16 = 0x4599;
-        var crcRegister: u16 = 0;
 
-        for (self.data) |byte| {
-            std.debug.print("byte: {x}\n", .{byte});
-            var count: u4 = 0;
-            for (0..8) |_| {
-                std.debug.print("Inner loop: {}\n", .{count});
-                const next = (byte >> (7 - count)) & 1;
-                std.debug.print("next: {}\n", .{next});
-                count = count + 1;
-
-                crcRegister = (crcRegister << 1) & 0x7FFF;
-                std.debug.print("crcRegister after left shift and mask: {}\n", .{crcRegister});
-                if (next != 0) {
-                    crcRegister ^= generatorPolynomial;
-                }
-            }
-        }
-
-        //add recessive bit delimiter at the end
-        crcRegister = (crcRegister << 1) | 1;
-        std.debug.print("=crcRegister after loop: {}=\n", .{crcRegister});
-        return crcRegister;
-    }
 };
 
 pub const CanRemoteFrame = struct {
@@ -254,10 +287,6 @@ pub const CanRemoteFrame = struct {
         };
 
         return frame;
-    }
-
-    pub fn calculateCRC() u16 {
-        // Calculate the CRC of the data
     }
 };
 
@@ -290,5 +319,3 @@ pub const CanInterframeSpacing = struct {
         return spacing;
     }
 };
-
-
