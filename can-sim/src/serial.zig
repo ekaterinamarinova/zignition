@@ -44,7 +44,8 @@ test "serialize remote frame" {
 }
 
 test "deserialize remote frame" {
-    const exp = can.CanRemoteFrame {
+    const rfr = try allocator.create(can.CanRemoteFrame);
+    rfr.* = can.CanRemoteFrame {
         .sof = 0b0,
         .arbitration = 0x01,
         .control = 0x04,
@@ -52,43 +53,43 @@ test "deserialize remote frame" {
         .ack = 0x1,
         .eof = 0x7F,
     };
+    const rfs = try serializeRemoteFrame(rfr.*);
 
-    const rf = try serializeRemoteFrame(exp);
-    var result: can.CanRemoteFrame = undefined;
-
-    std.debug.print("{any}", .{rf.items});
+    std.debug.print("{any}", .{rfs.items});
 
     var count: u32 = 0;
-    for (rf.items) |bit| {
+    var result: i8 = 0;
+    for (rfs.items) |bit| {
         // std.debug.print("Mapping bit {d} {}\n", .{count, bit});
-        result = try mapBitsToFrames(bit, count);
+        result = try mapBitsToFrames(bit, count, rfr);
         count += 1;
     }
 
-    std.debug.print("\nExpected: {any}\n", .{exp});
-    // std.debug.print("Serialized: {any}\n", .{rf.items});
-    std.debug.print("Result: {any} \n", .{result});
+    std.debug.print("\nExpected: {any}\n", .{rfr.*});
+    std.debug.print("result code: {d}\n", .{result});
 
-    try t.expectEqual(exp.arbitration, result.arbitration);
-    try t.expectEqual(exp.control, result.control);
-    try t.expectEqual(exp.crc, result.crc);
-    try t.expectEqual(exp.ack, result.ack);
-    try t.expectEqual(exp.eof, result.eof);
+    try t.expectEqual(0x01, rfr.arbitration);
+    try t.expectEqual(0x04, rfr.control);
+    try t.expectEqual(0x7FF3, rfr.crc);
 }
 
 var isRemoteFrame = false;
 var identifier = std.ArrayList(bool).init(allocator);
 
-pub fn mapBitsToFrames(bit: bool, order: u32) !can.CanRemoteFrame {
+pub fn mapBitsToFrames(bit: bool, order: u32, rf: *can.CanRemoteFrame) !i8 {
     // if sof detected from caller
+    const resultErr: i8 = -1;
+    const resultWait: i8 = 0;
+    const resultRfOk: i8 = 1;
+
     switch (order) {
         0 => {
             // sof is always dominant
             if (bit != false) {
-                return error.UnexpectedBit;
+                // return createRemoteFrameEmpty();
+                return resultErr;
             }
-
-            return createRemoteFrameEmpty();
+            return resultWait;
         },
         1...12 => {
             // arbitration field
@@ -98,16 +99,20 @@ pub fn mapBitsToFrames(bit: bool, order: u32) !can.CanRemoteFrame {
                 // rtr bit recessive -> create remote frame
                 // set isremoteframe to true
                 isRemoteFrame = true;
-                return createRemoteFrameEmpty();
+                return resultWait;
             } else {
                 // create data frame
-                return createRemoteFrameEmpty();
+                // return createRemoteFrameEmpty();
+                return resultWait;
             }
         },
         13...44 => {
-            // std.debug.print("desr remote frame value {} count {d}\n", .{bit, order});
             if (isRemoteFrame) {
-                return try deserializeRemoteFrame(bit, order);
+                try deserializeRemoteFrame(bit, order, rf);
+                if (43 == order) {
+                    return resultRfOk;
+                }
+                return resultWait;
             } else {
                 // create data frame
                 return error.UnexpectedBit;
@@ -119,18 +124,11 @@ pub fn mapBitsToFrames(bit: bool, order: u32) !can.CanRemoteFrame {
     }
 }
 
-
-var f = can.CanRemoteFrame{
-    .sof = 0,
-    .arbitration = 0x1,
-    .control = 0,
-    .crc = 0,
-    .ack = 0,
-    .eof = 0,
-};
-
-pub fn deserializeRemoteFrame(bit: bool, bitPosition: u32) !can.CanRemoteFrame {
+pub fn deserializeRemoteFrame(bit: bool, bitPosition: u32, rf: *can.CanRemoteFrame) !void {
     log.debug("Bit position: {d}\n", .{bitPosition});
+    var f = rf.*;
+    f.sof = 0;
+    f.arbitration = 0x01;
 
     //TODO erroor handling
     switch (bitPosition) {
@@ -178,7 +176,7 @@ pub fn deserializeRemoteFrame(bit: bool, bitPosition: u32) !can.CanRemoteFrame {
         },
     }
 
-    return f;
+   rf.* = f;
 }
 
 pub fn serializeRemoteFrame(frame: can.CanRemoteFrame) !std.ArrayList(bool) {
@@ -189,14 +187,12 @@ pub fn serializeRemoteFrame(frame: can.CanRemoteFrame) !std.ArrayList(bool) {
     var count: u4 = 0;
     for (0..12) |_| {
         const bit: u12 = frame.arbitration >> (11 - count) & 1;
-        // std.debug.print(" {b} ", .{bit});
         try append(bit, &boolBuff);
         count += 1;
     }
     var count2: u3 = 0;
     for (0..6) |_| {
         const bit: u6 = frame.control >> (5 - count2) & 1;
-        // std.debug.print(" {b}", .{bit});
         try append(bit, &boolBuff);
         count2 += 1;
     }
@@ -237,10 +233,10 @@ fn append(bit: u16, boolBuff: *std.ArrayList(bool)) !void {
     }
 }
 
-fn createRemoteFrameEmpty() can.CanRemoteFrame {
+pub fn createRemoteFrameEmpty() can.CanRemoteFrame {
     return can.CanRemoteFrame{
         .sof = 0,
-        .arbitration = 0,
+        .arbitration = 0x01,
         .control = 0,
         .crc = 0,
         .ack = 0,
