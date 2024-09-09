@@ -132,15 +132,6 @@ var f = can.CanRemoteFrame{
 pub fn deserializeRemoteFrame(bit: bool, bitPosition: u32) !can.CanRemoteFrame {
     log.debug("Bit position: {d}\n", .{bitPosition});
 
-    _ = can.CanRemoteFrame {
-        .sof = 0b0,
-        .arbitration = 0x01,
-        .control = 0x04,
-        .crc = 0x7FF3,
-        .ack = 0x1,
-        .eof = 0x7F,
-    };
-
     //TODO erroor handling
     switch (bitPosition) {
         13...18 => {
