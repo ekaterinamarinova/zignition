@@ -15,9 +15,6 @@ pub fn main() !void {
     // const crc: u16 = dataFrame.calculateCRC();
     // std.debug.print("CRC: {x}\n", .{crc});
 
-    // const bus = try allocator.create(VirtualBus);
-    // defer allocator.destroy(bus);
-
     var buffer = std.ArrayList(bool).init(allocator);
     defer buffer.deinit();
 
@@ -269,14 +266,14 @@ pub const CanDataFrame = struct {
 };
 
 pub const CanRemoteFrame = struct {
-    sof: u8,
-    arbitration: u16,
-    control: u8,
+    sof: u1,
+    arbitration: u12,
+    control: u6,
     crc: u16,
-    ack: u8,
-    eof: u8,
+    ack: u2,
+    eof: u7,
 
-    pub fn init(sof: u8, arbitration: u16, control: u8, crc: u16, ack: u8, eof: u8) CanRemoteFrame {
+    pub fn init(sof: u1, arbitration: u12, control: u6, crc: u16, ack: u2, eof: u7) CanRemoteFrame {
         const frame = CanRemoteFrame{
             .sof = sof,
             .arbitration = arbitration,
