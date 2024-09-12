@@ -9,12 +9,6 @@ const allocator = gpa.allocator();
 var activeConnections = std.ArrayList(net.Server.Connection).init(allocator);
 
 pub fn main() !void {
-    // Initialize an instance of CanDataFrame
-    // const dataFrame =
-    // CanDataFrame.init(0x00, 0x7FF, 0b0000_0100, &[_]u16{ 0b01010101, 0x55, 0x03, 0x04 }, 0x07, 0x00, 0b01111111);
-    // const crc: u16 = dataFrame.calculateCRC();
-    // std.debug.print("CRC: {x}\n", .{crc});
-
     var buffer = std.ArrayList(bool).init(allocator);
     defer buffer.deinit();
 
@@ -202,18 +196,20 @@ pub const CanNode = struct {
     }
 };
 
-pub fn calculateCRC(data: []const u16) u16 {
+pub fn calculateCRC(data: []const u8) u16 {
     const generatorPolynomial: u16 = 0x4599;
     var crcRegister: u16 = 0;
 
     for (data) |byte| {
         // std.debug.print("byte: {x}\n", .{byte});
-        var count: u4 = 0;
+        var count: u3 = 0;
         for (0..8) |_| {
             // debug.print("Inner loop: {}\n", .{count});
             const next = (byte >> (7 - count)) & 1;
             // debug.print("next: {}\n", .{next});
-            count = count + 1;
+            if (count != 7) {
+                count = count + 1;
+            }
 
             crcRegister = (crcRegister << 1) & 0x7FFF;
             // debug.print("crcRegister after left shift and mask: {}\n", .{crcRegister});
@@ -231,24 +227,24 @@ pub fn calculateCRC(data: []const u16) u16 {
 
 pub const CanDataFrame = struct {
     // 1 dominant bit (0)
-    sof: u8,
+    sof: u1,
     // id - 11b; rtr - 1b dominant (0)
-    arbitration: u16,
+    arbitration: u12,
     // 2b dominant, 4b data len
-    control: u8,
+    control: u6,
     // 8B, transmittet MSB first
-    data: []const u16,
+    data: []u8,
     // 15 bit register; 1b recessive delimiter
     crc: u16,
 
     // 1b ack slot 1b ack delimiter;
     // transmitting station sends [11]
     // receiver sends to transmitter [10] if received correctly
-    ack: u8,
+    ack: u2,
     // 7 recessive bits (1)
-    eof: u8,
+    eof: u7,
 
-    pub fn init(sof: u8, arbitration: u16, control: u8, data: []const u16, crc: u16, ack: u8, eof: u8) CanDataFrame {
+    pub fn init(sof: u8, arbitration: u16, control: u8, data: []u8, crc: u16, ack: u8, eof: u8) CanDataFrame {
         const frame = CanDataFrame{
             .sof = sof,
             .arbitration = arbitration,
@@ -302,8 +298,11 @@ pub const CanErrorFrame = struct {
 };
 
 pub const CanInterframeSpacing = struct {
-    intermission: u8,
+    // 3 recessive (1)
+    intermission: u3,
+    // 8 recessive (1) for error passive
     suspendTransmission: u8,
+    // arbitrary number of recessive bits (1)
     busIdle: u8,
 
     pub fn init(intermission: u8, suspendTransmission: u8, busIdle: u8) CanInterframeSpacing {
