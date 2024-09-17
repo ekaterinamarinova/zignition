@@ -101,6 +101,5 @@ test "serialize data frame" {
 
     const bytes = try serial.serializeDataFrame(frame);
 
-    //data lenght is 1 bit so rf bit size (44) + 1 = 45
     try t.expectEqual(52, bytes.items.len);
 }
