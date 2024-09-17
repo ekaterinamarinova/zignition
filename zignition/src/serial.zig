@@ -89,24 +89,24 @@ pub fn serializeDataFrame(frame: bus.CanDataFrame) !std.ArrayList(bool) {
     // sof is always 1 dominant bit
     try boolBuff.append(false);
 
-    var count: u4 = 0;
+    var count4b: u4 = 0;
     for (0..12) |_| {
-        const bit: u12 = frame.arbitration >> (11 - count) & 1;
+        const bit: u12 = frame.arbitration >> (11 - count4b) & 1;
         try append(bit, &boolBuff);
-        count += 1;
+        count4b += 1;
     }
 
     const dLength: u6 = (frame.control >> 2) & 0xF;
     // std.debug.print("Data lenght is: {d}\n", .{dLength});
 
-    var count2: u3 = 0;
+    var count3b: u3 = 0;
     for (0..6) |_| {
-        const bit: u6 = frame.control >> (5 - count2) & 1;
+        const bit: u6 = frame.control >> (5 - count3b) & 1;
         try append(bit, &boolBuff);
-        count2 += 1;
+        count3b += 1;
     }
 
-    count2 = 0;
+    count3b = 0;
 
     var byteC: u8 = 0;
     for (frame.data) |byte| {
@@ -114,41 +114,41 @@ pub fn serializeDataFrame(frame: bus.CanDataFrame) !std.ArrayList(bool) {
             break;
         }
         for (0..8) |_| {
-            const bit: u8 = byte >> (7 - count2) & 1;
+            const bit: u8 = byte >> (7 - count3b) & 1;
             try append(bit, &boolBuff);
 
-            if (count2 != 7) {
-                count2 += 1;
+            if (count3b != 7) {
+                count3b += 1;
             }
         }
 
-        count2 = 0;
+        count3b = 0;
         byteC += 1;
     }
 
-    var count3: u4 = 0;
+    var count4b: u4 = 0;
     for (0..16) |_| {
-        const a: u4 = (15 - count3);
+        const a: u4 = (15 - count4b);
         const bit: u16 = (frame.crc >> a) & 1;
         try append(bit, &boolBuff);
-        if (count3 != 15) {
-            count3 += 1;
+        if (count4b != 15) {
+            count4b += 1;
         }
     }
 
-    count2 = 0;
+    count3b = 0;
     for (0..2) |_| {
-        const a: u1 = @intCast(count2);
+        const a: u1 = @intCast(count3b);
         const bit: u2 = frame.ack >> (1 - a) & 1;
         try append(bit, &boolBuff);
-        count2 += 1;
+        count3b += 1;
     }
 
-    count2 = 0;
+    count3b = 0;
     for (0..7) |_| {
-        const bit: u7 = frame.eof >> (6 - count2) & 1;
+        const bit: u7 = frame.eof >> (6 - count3b) & 1;
         try append(bit, &boolBuff);
-        count2 += 1;
+        count3b += 1;
     }
 
     return boolBuff;
@@ -248,7 +248,6 @@ pub fn deserializeRemoteFrame(bit: bool, bitPosition: u32, rf: *bus.CanRemoteFra
     f.sof = 0;
     f.arbitration = 0x01;
 
-    //TODO erroor handling
     switch (bitPosition) {
         13...18 => {
             // last two bits are reserved, must be dominant
