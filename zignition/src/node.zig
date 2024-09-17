@@ -19,6 +19,18 @@ var i: usize = 0;
 var res: bus.CanUnion = undefined;
 var mut = std.Thread.Mutex{};
 
+pub const NodesConfig = struct {
+    nodes: []NodeConfig
+};
+
+pub const NodeConfig = struct {
+    id: u12,
+    name: []const u8,
+    host: []const u8,
+    port: u32,
+    isTransmitter: bool
+};
+
 pub fn main() !void {
     const t1 = try std.Thread.spawn(
         .{}, connect, .{"ecu", true});
@@ -30,6 +42,38 @@ pub fn main() !void {
 
     defer allocator.destroy(rf.?);
     defer allocator.destroy(df.?);
+}
+
+test "test json parse" {
+    try parseConfig();
+}
+
+pub fn parseConfig() !void {
+    const config: *NodesConfig = try allocator.create(NodesConfig);
+    defer allocator.destroy(config);
+    //TODO handle destroy accordingly in future
+
+    const parsed = try std.json.parseFromSlice(
+        NodesConfig,
+        allocator,
+        try readFile("/home/mae2sf/Documents/zig/resources/node-config.json"),
+        .{}
+    );
+
+    config.* = parsed.value;
+    std.debug.print("Parsed: {any}\n", .{config});
+}
+
+pub fn readFile(filePath: []const u8) ![]u8 {
+    std.debug.print("Working dir: {any}\n", .{std.fs.cwd()});
+    const file = try std.fs.openFileAbsolute(filePath, .{});
+    defer file.close();
+
+    const fileSize = try file.getEndPos();
+    const buffer: []u8 = try allocator.alloc(u8, fileSize);
+    _ = try file.reader().readAll(buffer);
+
+    return buffer;
 }
 
 fn handler(client: net.Stream, doTransmit: bool, clName: []const u8) !void {

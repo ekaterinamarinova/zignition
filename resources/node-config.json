@@ -1,0 +1,18 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "name": "Node1",
+      "host": "127.0.0.1",
+      "port": 8080,
+      "isTransmitter": true
+    },
+    {
+      "id": 2,
+      "name": "Node2",
+      "host": "127.0.0.1",
+      "port": 8080,
+      "isTransmitter": false
+    }
+  ]
+}
