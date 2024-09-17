@@ -150,22 +150,6 @@ pub const CanNode = struct {
         };
         return node;
     }
-
-    pub fn connect() void {
-        // Connect to the bus
-    }
-
-    pub fn disconnect() void {
-        // Disconnect from the bus
-    }
-
-    pub fn sendFrame() void {
-        // Send a data frame
-    }
-
-    pub fn receiveFrame() void {
-        // Receive a data frame
-    }
 };
 
 pub fn calculateCRC(data: []const u8) u16 {
