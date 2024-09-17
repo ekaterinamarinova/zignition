@@ -56,7 +56,7 @@ pub fn parseConfig() !void {
     const parsed = try std.json.parseFromSlice(
         NodesConfig,
         allocator,
-        try readFile("/home/mae2sf/Documents/zig/resources/node-config.json"),
+        try readFile("/zig/resources/node-config.json"),
         .{}
     );
 
