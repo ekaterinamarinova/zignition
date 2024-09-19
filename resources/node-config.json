@@ -2,17 +2,33 @@
   "nodes": [
     {
       "id": 1,
-      "name": "Node1",
+      "name": "ecu",
       "host": "127.0.0.1",
       "port": 8080,
-      "isTransmitter": true
+      "isTransmitter": false,
+      "ignoreFilter": {}
     },
     {
       "id": 2,
-      "name": "Node2",
+      "name": "lPosition",
       "host": "127.0.0.1",
       "port": 8080,
-      "isTransmitter": false
+      "isTransmitter": true,
+      "ignoreFilter": {
+        "id": 3,
+        "nodeName": "rPosition"
+      }
+    },
+    {
+      "id": 3,
+      "name": "rPosition",
+      "host": "127.0.0.1",
+      "port": 8080,
+      "isTransmitter": true,
+      "ignoreFilter": {
+        "id": 2,
+        "nodeName": "lPosition"
+      }
     }
   ]
 }
