@@ -6,21 +6,21 @@ const t = std.testing;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
-var rfp: ?*bus.CanRemoteFrame = null;
-var dfp: ?*bus.CanDataFrame = null;
+threadlocal var rfp: ?*bus.CanRemoteFrame = null;
+threadlocal var dfp: ?*bus.CanDataFrame = null;
 
-var isRemoteFrame = false;
-var isDataFrame = false;
-var identifier = std.ArrayList(bool).init(allocator);
+threadlocal var isRemoteFrame = false;
+threadlocal var isDataFrame = false;
+threadlocal var identifier = std.ArrayList(bool).init(allocator);
 
-var dFieldLastBit: u8 = undefined;
-var dLen: u8 = 0;
-var bitBuff: u8 = 0;
-var bitCount: u8 = 0;
-var byteCount: u8 = 0;
-var dataPos: u8 = 0;
+threadlocal var dFieldLastBit: u8 = undefined;
+threadlocal var dLen: u8 = 0;
+threadlocal var bitBuff: u8 = 0;
+threadlocal var bitCount: u8 = 0;
+threadlocal var byteCount: u8 = 0;
+threadlocal var dataPos: u8 = 0;
 
-var d = [_]u8{0,0};
+threadlocal var d = [_]u8{0,0};
 
 const ProcessingError = error {
     UnexpectedBit,
@@ -29,6 +29,7 @@ const ProcessingError = error {
 
 pub fn mapBitsToFrames(bit: bool, order: u32) !bus.CanUnion {
     // if sof detected from caller
+    std.debug.print("order {d} isrf {} isdf {}\n", .{order, isRemoteFrame, isDataFrame});
     switch (order) {
         0 => {
             // sof is always dominant
@@ -41,10 +42,8 @@ pub fn mapBitsToFrames(bit: bool, order: u32) !bus.CanUnion {
             try identifier.append(bit);
             if (order == 12 and bit == true) {
                 // rtr bit recessive -> create remote frame
-                // std.debug.print("is remote frame..\n", .{});
                 isRemoteFrame = true;
-            } else {
-                // std.debug.print("is data frame..\n", .{});
+            } else if (order == 12 and bit == false) {
                 isDataFrame = true;
             }
         },
@@ -89,15 +88,14 @@ pub fn serializeDataFrame(frame: bus.CanDataFrame) !std.ArrayList(bool) {
     // sof is always 1 dominant bit
     try boolBuff.append(false);
 
-    var count4b: u4 = 0;
+    var count4b2: u4 = 0;
     for (0..12) |_| {
-        const bit: u12 = frame.arbitration >> (11 - count4b) & 1;
+        const bit: u12 = frame.arbitration >> (11 - count4b2) & 1;
         try append(bit, &boolBuff);
-        count4b += 1;
+        count4b2 += 1;
     }
 
     const dLength: u6 = (frame.control >> 2) & 0xF;
-    // std.debug.print("Data lenght is: {d}\n", .{dLength});
 
     var count3b: u3 = 0;
     for (0..6) |_| {
@@ -126,13 +124,13 @@ pub fn serializeDataFrame(frame: bus.CanDataFrame) !std.ArrayList(bool) {
         byteC += 1;
     }
 
-    var count4b: u4 = 0;
+    var count4b3: u4 = 0;
     for (0..16) |_| {
-        const a: u4 = (15 - count4b);
+        const a: u4 = (15 - count4b3);
         const bit: u16 = (frame.crc >> a) & 1;
         try append(bit, &boolBuff);
-        if (count4b != 15) {
-            count4b += 1;
+        if (count4b3 != 15) {
+            count4b3 += 1;
         }
     }
 
