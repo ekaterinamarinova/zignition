@@ -122,11 +122,9 @@ pub fn handleClient(
                             try conn.stream.writer().writeByte(0);
                         }
                     }
-
-                    buff.clearRetainingCapacity();
                 }
             }
-
+            buff.clearRetainingCapacity();
             Mutex.unlock();
         }
 
