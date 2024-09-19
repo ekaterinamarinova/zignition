@@ -1,4 +1,4 @@
 .idea
 .vscode
 .zig-cache
-zignition/zig-out
+main/zig-out
