@@ -8,16 +8,16 @@ const t = std.testing;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 
-var boolBuff = std.ArrayList(bool).init(allocator);
-var rf: ?*bus.CanRemoteFrame = null;
-var df: ?*bus.CanDataFrame = null;
+threadlocal var boolBuff = std.ArrayList(bool).init(allocator);
 
-var isRFSent: bool = false;
-var count: u32 = 0;
-var i: usize = 0;
+threadlocal var rf: ?*bus.CanRemoteFrame = null;
+threadlocal var df: ?*bus.CanDataFrame = null;
 
-var res: bus.CanUnion = undefined;
+threadlocal var isRFSent: bool = false;
+
+threadlocal var res: bus.CanUnion = undefined;
 var mut = std.Thread.Mutex{};
+var cond = std.Thread.Condition{};
 
 pub const NodesConfig = struct {
     nodes: []NodeConfig
@@ -28,16 +28,23 @@ pub const NodeConfig = struct {
     name: []const u8,
     host: []const u8,
     port: u32,
-    isTransmitter: bool
+    isTransmitter: bool,
+    ignoreFilter: union {
+        id: u12,
+        nodeName: []u8,
+    }
 };
 
 pub fn main() !void {
     const t1 = try std.Thread.spawn(
         .{}, connect, .{"ecu", true});
+    const t3 = try std.Thread.spawn(
+        .{}, connect, .{"ecu2", true});
     const t2  = try std.Thread.spawn(
         .{}, connect, .{"oxs", false});
 
     t1.detach();
+    t3.detach();
     t2.join();
 
     defer allocator.destroy(rf.?);
@@ -76,14 +83,13 @@ pub fn readFile(filePath: []const u8) ![]u8 {
     return buffer;
 }
 
-fn handler(client: net.Stream, doTransmit: bool, clName: []const u8) !void {
+fn handler(client: net.Stream, doTransmit: bool, clName: []const u8, count: *u32) !void {
     if (doTransmit) {
-        // wait for a remote frame to start transmission
-        try read(client, clName);
+        try read(client, clName, count);
     } else {
         if (isRFSent) {
            // wait for data frame to be received
-            try read(client, clName);
+            try read(client, clName, count);
             return;
         }
         
@@ -95,8 +101,7 @@ fn handler(client: net.Stream, doTransmit: bool, clName: []const u8) !void {
             write(client, cast, clName);
         }
         isRFSent = true;
-        count = 0;
-        std.time.sleep(10 * std.time.ns_per_s);
+        std.time.sleep(5 * std.time.ns_per_s);
     }
 }
 
@@ -106,16 +111,17 @@ pub fn connect(clName: []const u8, doTransmit: bool) !void {
     log.info("Connecing from node: {s} to address: {s} port: {d}\n", .{clName, address, 8080});
     var client = try net.tcpConnectToAddress(add);
     log.info("Connected to server, from node: {s} handling...\n", .{clName});
-
+    var count: u32 = 0;
     while (true) {
-        try handler(client, doTransmit, clName);
+        try handler(client, doTransmit, clName, &count);
     }
 
     defer client.close();
 }
 
-fn read(stream: net.Stream, clName: []const u8) !void {
+fn read(stream: net.Stream, clName: []const u8, count: *u32) !void {
     var bit: bool = undefined;
+
     const byte = try stream.reader().readByte();
 
     switch (byte) {
@@ -131,18 +137,16 @@ fn read(stream: net.Stream, clName: []const u8) !void {
         },
     }
 
-    mut.lock();
-    defer mut.unlock();
+    log.info("[{s}] Count: {d}\n", .{clName, count.*});
 
-    log.info("[{s}] Count: {d}\n", .{clName, count});
-    res = try sr.mapBitsToFrames(bit, count);
-    count += 1;
+    res = try sr.mapBitsToFrames(bit, count.*);
+    count.* += 1;
 
     switch (res) {
         .CanRemoteFrame => {
             log.info("[{s}] Remote frame received!\n", .{clName});
             rf = res.CanRemoteFrame;
-            count = 0;
+            count.* = 0;
             if (rf != null and rf.?.*.eof == 127) {
                 // confirmation we've mapped the full remote frame
                 try sendDataFrame(stream, clName);
@@ -152,10 +156,14 @@ fn read(stream: net.Stream, clName: []const u8) !void {
             df = res.CanDataFrame;
             if (df != null) {
                 log.info("[{s}] Data frame values: {any}\n", .{clName, df.?});
+
+                if (df.?.*.eof == 127) {
+                    log.info("[{s}] Data frame received!\n", .{clName});
+                }
             }
         },
         else => {
-            log.info("[{s}] Mapping bits to frames..\n", .{clName});
+            // log.info("[{s}] Mapping bits to frames..\n", .{clName});
         }
     }
 }
