@@ -4,7 +4,7 @@
 
 Simulator for CAN data over TCP. Each node is a client connected to the TCP server. 
 The server emulates the role of the CAN bus, it receives messages from the clients and forwards them to all the other connections.
-Currently, each client connection is handled in a separate thread. This might chane in the future, 
+Currently, each client connection is handled in a separate thread. This might change in the future, 
 as another option is to use syscalls like poll() or select() to handle multiple connections in a single thread.
 
 ## Usage
