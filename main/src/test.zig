@@ -27,7 +27,7 @@ test "deserialize data frame" {
     var result: can.CanUnion = undefined;
     var testCount: u32 = 0;
     for (serialized.items) |bit| {
-        result = try serial.mapBitsToFrames(bit, testCount);
+        result = try serial.mapBitsToFrames(bit, testCount, 5);
         testCount += 1;
     }
 
@@ -66,7 +66,7 @@ test "deserialize remote frame" {
     var count: u32 = 0;
     var result: can.CanUnion = undefined;
     for (rfs.items) |bit| {
-        result = try serial.mapBitsToFrames(bit, count);
+        result = try serial.mapBitsToFrames(bit, count, 5);
         count += 1;
     }
 
