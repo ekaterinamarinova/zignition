@@ -26,6 +26,6 @@ Its purpose is to clarify and visualise the structure of CAN frames and the prot
 
 ## TODO
 
-- [ ] Create nodes based on a configuration file
+- [x] Create nodes based on a configuration file
 - [ ] Enhance error handling 
 - [ ] Implement acknowledgement 
