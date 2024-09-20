@@ -29,50 +29,54 @@ pub const NodeConfig = struct {
     host: []const u8,
     port: u32,
     isTransmitter: bool,
-    ignoreFilter: union {
+    ignoreFilter: struct {
         id: u12,
         nodeName: []u8,
     }
 };
 
 pub fn main() !void {
-    const t1 = try std.Thread.spawn(
-        .{}, connect, .{"ecu", true});
-    const t3 = try std.Thread.spawn(
-        .{}, connect, .{"ecu2", true});
-    const t2  = try std.Thread.spawn(
-        .{}, connect, .{"oxs", false});
+    const config = parseConfig();
+    if (config == null) {
+        log.debug("Config is null\n", .{});
+        return;
+    }
 
-    t1.detach();
-    t3.detach();
-    t2.join();
+    log.debug("Config: {any}", .{config.?.nodes});
+
+    for (config.?.nodes) |nodecf| {
+        const threadd = try std.Thread.spawn(.{}, connect, .{nodecf.name, nodecf.isTransmitter});
+        threadd.detach();
+    }
+
+    while (true) {
+        // since we're detaching the threads
+        // we have to run the main thread indefinitely
+        // until a critical error occurs
+        // or the program is terminated
+    }
 
     defer allocator.destroy(rf.?);
     defer allocator.destroy(df.?);
 }
 
-test "test json parse" {
-    try parseConfig();
-}
-
-pub fn parseConfig() !void {
-    const config: *NodesConfig = try allocator.create(NodesConfig);
-    defer allocator.destroy(config);
-    //TODO handle destroy accordingly in future
-
-    const parsed = try std.json.parseFromSlice(
+pub fn parseConfig() ?NodesConfig {
+    const parsed = std.json.parseFromSlice(
         NodesConfig,
         allocator,
-        try readFile("/zig/resources/node-config.json"),
+        readFile("/home/mae2sf/Documents/zig/resources/node-config.json") catch |err| {
+            log.info("Error reading file: {any}\n", .{err});
+            return null;
+        },
         .{}
-    );
-
-    config.* = parsed.value;
-    std.debug.print("Parsed: {any}\n", .{config});
+    ) catch |err| {
+        log.info("Error parsing config: {any}\n", .{err});
+        return null;
+    };
+    return parsed.value;
 }
 
 pub fn readFile(filePath: []const u8) ![]u8 {
-    std.debug.print("Working dir: {any}\n", .{std.fs.cwd()});
     const file = try std.fs.openFileAbsolute(filePath, .{});
     defer file.close();
 
