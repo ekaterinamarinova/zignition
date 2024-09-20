@@ -27,7 +27,7 @@ pub const NodeConfig = struct {
     id: u12,
     name: []const u8,
     host: []const u8,
-    port: u32,
+    port: u16,
     isTransmitter: bool,
     ignoreFilter: struct {
         id: u12,
@@ -45,7 +45,13 @@ pub fn main() !void {
     log.debug("Config: {any}", .{config.?.nodes});
 
     for (config.?.nodes) |nodecf| {
-        const threadd = try std.Thread.spawn(.{}, connect, .{nodecf.name, nodecf.isTransmitter});
+        const threadd = try std.Thread.spawn(.{}, connect,.{
+            nodecf.name,
+            nodecf.isTransmitter,
+            nodecf.host,
+            nodecf.port,
+            nodecf.ignoreFilter.id,
+        });
         threadd.detach();
     }
 
@@ -87,13 +93,13 @@ pub fn readFile(filePath: []const u8) ![]u8 {
     return buffer;
 }
 
-fn handler(client: net.Stream, doTransmit: bool, clName: []const u8, count: *u32) !void {
+fn handler(client: net.Stream, doTransmit: bool, clName: []const u8, count: *u32, ignoreId: u12) !void {
     if (doTransmit) {
-        try read(client, clName, count);
+        try read(client, clName, count, ignoreId);
     } else {
         if (isRFSent) {
            // wait for data frame to be received
-            try read(client, clName, count);
+            try read(client, clName, count, ignoreId);
             return;
         }
         
@@ -109,21 +115,20 @@ fn handler(client: net.Stream, doTransmit: bool, clName: []const u8, count: *u32
     }
 }
 
-pub fn connect(clName: []const u8, doTransmit: bool) !void {
-    const address: []const u8 = "127.0.0.1";
-    const add = try net.Address.parseIp4(address, 8080);
-    log.info("Connecing from node: {s} to address: {s} port: {d}\n", .{clName, address, 8080});
+pub fn connect(clName: []const u8, doTransmit: bool, address: []const u8, port: u16, ignoreId: u12) !void {
+    const add = try net.Address.parseIp4(address, port);
+    log.info("Connecing from node: {s} to address: {s} port: {d}\n", .{clName, address, port});
     var client = try net.tcpConnectToAddress(add);
     log.info("Connected to server, from node: {s} handling...\n", .{clName});
     var count: u32 = 0;
     while (true) {
-        try handler(client, doTransmit, clName, &count);
+        try handler(client, doTransmit, clName, &count, ignoreId);
     }
 
     defer client.close();
 }
 
-fn read(stream: net.Stream, clName: []const u8, count: *u32) !void {
+fn read(stream: net.Stream, clName: []const u8, count: *u32, ignoreId: u12) !void {
     var bit: bool = undefined;
 
     const byte = try stream.reader().readByte();
@@ -143,7 +148,7 @@ fn read(stream: net.Stream, clName: []const u8, count: *u32) !void {
 
     log.info("[{s}] Count: {d}\n", .{clName, count.*});
 
-    res = try sr.mapBitsToFrames(bit, count.*);
+    res = try sr.mapBitsToFrames(bit, count.*, ignoreId);
     count.* += 1;
 
     switch (res) {
