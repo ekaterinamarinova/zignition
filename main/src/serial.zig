@@ -27,7 +27,7 @@ const ProcessingError = error {
     ByteOverflow,
 };
 
-pub fn mapBitsToFrames(bit: bool, order: u32) !bus.CanUnion {
+pub fn mapBitsToFrames(bit: bool, order: u32, ignoreId: u12) !bus.CanUnion {
     // if sof detected from caller
     std.debug.print("order {d} isrf {} isdf {}\n", .{order, isRemoteFrame, isDataFrame});
     switch (order) {
@@ -70,7 +70,7 @@ pub fn mapBitsToFrames(bit: bool, order: u32) !bus.CanUnion {
                     identifier.clearRetainingCapacity();
                 }
 
-                try deserializeDataFrame(bit, order, &identifier);
+                try deserializeDataFrame(bit, order, &identifier, ignoreId);
                 return bus.CanUnion{ .CanDataFrame = dfp.? };
             }
         },
@@ -152,7 +152,7 @@ pub fn serializeDataFrame(frame: bus.CanDataFrame) !std.ArrayList(bool) {
     return boolBuff;
 }
 
-pub fn deserializeDataFrame(bit: bool, bitPosition: u32, id: *std.ArrayList(bool)) !void {
+pub fn deserializeDataFrame(bit: bool, bitPosition: u32, id: *std.ArrayList(bool), ignoreId: u12) !void {
     // remote frame received, send back a data frame
     var f = dfp.?.*;
 
@@ -160,11 +160,19 @@ pub fn deserializeDataFrame(bit: bool, bitPosition: u32, id: *std.ArrayList(bool
         f.sof = 0;
     }
 
-    for (id.items) |b| {
-        f.arbitration <<= 1;
-        if (b) {
-            f.arbitration |= 1;
+    if (f.arbitration == 0) {
+        for (id.items) |b| {
+            f.arbitration <<= 1;
+            if (b) {
+                f.arbitration |= 1;
+            }
         }
+    }
+
+    dfp.?.* = f;
+
+    if ((f.arbitration >> 1) == ignoreId) {
+        return;
     }
 
     if (bitPosition <= bits.ControlFieldLastBit.value()) {
