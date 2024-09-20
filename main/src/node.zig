@@ -71,7 +71,7 @@ pub fn parseConfig() ?NodesConfig {
     const parsed = std.json.parseFromSlice(
         NodesConfig,
         allocator,
-        readFile("/home/mae2sf/Documents/zig/resources/node-config.json") catch |err| {
+        readFile("/zig/resources/node-config.json") catch |err| {
             log.info("Error reading file: {any}\n", .{err});
             return null;
         },
