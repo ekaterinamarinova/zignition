@@ -6,7 +6,10 @@
       "host": "127.0.0.1",
       "port": 8080,
       "isTransmitter": false,
-      "ignoreFilter": {}
+        "ignoreFilter": {
+            "id": 0,
+            "nodeName": ""
+        }
     },
     {
       "id": 2,
