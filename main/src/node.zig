@@ -47,6 +47,7 @@ pub fn main() !void {
     for (config.?.nodes) |nodecf| {
         const threadd = try std.Thread.spawn(.{}, connect,.{
             nodecf.name,
+            nodecf.id,
             nodecf.isTransmitter,
             nodecf.host,
             nodecf.port,
@@ -93,13 +94,13 @@ pub fn readFile(filePath: []const u8) ![]u8 {
     return buffer;
 }
 
-fn handler(client: net.Stream, doTransmit: bool, clName: []const u8, count: *u32, ignoreId: u12) !void {
+fn handler(client: net.Stream, id: u12, doTransmit: bool, clName: []const u8, count: *u32, ignoreId: u12) !void {
     if (doTransmit) {
-        try read(client, clName, count, ignoreId);
+        try read(client, id, clName, count, ignoreId);
     } else {
         if (isRFSent) {
            // wait for data frame to be received
-            try read(client, clName, count, ignoreId);
+            try read(client, id, clName, count, ignoreId);
             return;
         }
         
@@ -115,20 +116,20 @@ fn handler(client: net.Stream, doTransmit: bool, clName: []const u8, count: *u32
     }
 }
 
-pub fn connect(clName: []const u8, doTransmit: bool, address: []const u8, port: u16, ignoreId: u12) !void {
+pub fn connect(clName: []const u8, id: u12, doTransmit: bool, address: []const u8, port: u16, ignoreId: u12) !void {
     const add = try net.Address.parseIp4(address, port);
     log.info("Connecing from node: {s} to address: {s} port: {d}\n", .{clName, address, port});
     var client = try net.tcpConnectToAddress(add);
     log.info("Connected to server, from node: {s} handling...\n", .{clName});
     var count: u32 = 0;
     while (true) {
-        try handler(client, doTransmit, clName, &count, ignoreId);
+        try handler(client, id, doTransmit, clName, &count, ignoreId);
     }
 
     defer client.close();
 }
 
-fn read(stream: net.Stream, clName: []const u8, count: *u32, ignoreId: u12) !void {
+fn read(stream: net.Stream, id: u12, clName: []const u8, count: *u32, ignoreId: u12) !void {
     var bit: bool = undefined;
 
     const byte = try stream.reader().readByte();
@@ -158,7 +159,7 @@ fn read(stream: net.Stream, clName: []const u8, count: *u32, ignoreId: u12) !voi
             count.* = 0;
             if (rf != null and rf.?.*.eof == 127) {
                 // confirmation we've mapped the full remote frame
-                try sendDataFrame(stream, clName);
+                try sendDataFrame(stream, clName, id);
             }
         },
         .CanDataFrame => {
@@ -177,9 +178,9 @@ fn read(stream: net.Stream, clName: []const u8, count: *u32, ignoreId: u12) !voi
     }
 }
 
-pub fn sendDataFrame(stream: net.Stream, clName: []const u8) !void {
+pub fn sendDataFrame(stream: net.Stream, clName: []const u8, id: u12) !void {
     log.info("\n[{s}] Sending data frame..\n", .{clName});
-    const data = sr.createDataFrame();
+    const data = sr.createDataFrame(id);
     const serialized = try sr.serializeDataFrame(data);
     defer serialized.deinit();
 

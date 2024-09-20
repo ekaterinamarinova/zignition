@@ -394,15 +394,14 @@ pub fn createRemoteFrame() bus.CanRemoteFrame {
     };
 }
 
-pub fn createDataFrame() bus.CanDataFrame {
+pub fn createDataFrame(id: u12) bus.CanDataFrame {
     var data = [_]u8{0b11111000, 0b10};
     return bus.CanDataFrame{
         .sof = 0b0,
-        .arbitration = 0b000000000100,
+        .arbitration = id << 1,
         .control = 0b001000,
         .data = &data,
-        // .crc = can.calculateCRC(&data),
-        .crc = 0x0,
+        .crc = bus.calculateCRC(&data),
         .ack = 0b1,
         .eof = 0x7F,
     };
