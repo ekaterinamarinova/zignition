@@ -4,7 +4,7 @@
       "id": 1,
       "name": "ecu",
       "host": "127.0.0.1",
-      "port": 8080,
+      "port": 8085,
       "isTransmitter": false,
       "ignoreFilter": {
         "id": 0,
@@ -15,7 +15,7 @@
       "id": 2,
       "name": "lPosition",
       "host": "127.0.0.1",
-      "port": 8080,
+      "port": 8085,
       "isTransmitter": true,
       "ignoreFilter": {
         "id": 3,
@@ -26,7 +26,7 @@
       "id": 3,
       "name": "rPosition",
       "host": "127.0.0.1",
-      "port": 8080,
+      "port": 8085,
       "isTransmitter": true,
       "ignoreFilter": {
         "id": 2,

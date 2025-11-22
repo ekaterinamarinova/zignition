@@ -45,7 +45,7 @@ pub fn main() !void {
     log.debug("Config: {any}", .{config.?.nodes});
 
     for (config.?.nodes) |nodecf| {
-        const threadd = try std.Thread.spawn(.{}, connect,.{
+        const nodeThread = try std.Thread.spawn(.{}, connect,.{
             nodecf.name,
             nodecf.id,
             nodecf.isTransmitter,
@@ -53,7 +53,7 @@ pub fn main() !void {
             nodecf.port,
             nodecf.ignoreFilter.id,
         });
-        threadd.detach();
+        nodeThread.detach();
     }
 
     while (true) {
@@ -94,6 +94,7 @@ pub fn readFile(filePath: []const u8) ![]u8 {
     return buffer;
 }
 
+threadlocal var singleByteBuff: [1]u8 = undefined;
 fn handler(client: net.Stream, id: u12, doTransmit: bool, clName: []const u8, count: *u32, ignoreId: u12) !void {
     if (doTransmit) {
         try read(client, id, clName, count, ignoreId);
@@ -103,17 +104,88 @@ fn handler(client: net.Stream, id: u12, doTransmit: bool, clName: []const u8, co
             try read(client, id, clName, count, ignoreId);
             return;
         }
-        
+
         const remote = sr.createRemoteFrame();
         const serialized = try sr.serializeRemoteFrame(remote);
         log.info("[{s}] Serialized frame, sending...: {any}\n", .{clName, serialized.items});
         for (serialized.items) |value| {
             const cast: u8 = @intFromBool(value);
             write(client, cast, clName);
+            // std.time.sleep(1 * std.time.ns_per_s);
+
+            const byte = client.read(&singleByteBuff) catch |err| {
+                if (err == error.WouldBlock) {
+                    return;
+                } else {
+                    log.info("[{s}] Error reading from stream: {any}\n", .{clName, err});
+                    return;
+                }
+            };
+
+            _ = byte;
+            // std.debug.print(" Received bytes num: {d} \n", .{byte});
+
+            if (singleByteBuff[0] == cast) {
+                // log.info("[{s}] RF bit equal {d} {d}\n", .{clName, singleByteBuff[0], cast});
+            } else {
+                log.info("[{s}] RF bit not equal! => {d} {d}\n", .{clName, singleByteBuff[0], cast});
+                // if we enter here during the arbitratio period, then another node is racing for the bus
+                if (count.* < 12 and singleByteBuff[0] < cast) {
+                    //if read bit is recessive but we sent dominant, continue transmission
+                    //if read bit is dominant but we send recessive, end transmission
+                    return;
+                }
+
+            }
+
+            // read(client, id, clName, count, ignoreId);
         }
+
+        //TODO think about setting this only when confirmed that current node hasnt lost arbitration
         isRFSent = true;
-        std.time.sleep(5 * std.time.ns_per_s);
     }
+}
+
+pub fn sendDataFrame(stream: net.Stream, clName: []const u8, id: u12, count: *u32) !bool {
+    log.info("\n[{s}] Sending data frame..\n", .{clName});
+    var d = [_]u8{0b11111000, 0b10};
+    const data = sr.createDataFrame(&d, id);
+    std.debug.print("[{s}] Created data frame {any} \n", .{clName, data});
+    const serialized = try sr.serializeDataFrame(data);
+    defer serialized.deinit();
+
+    log.info("[{s}]Serialized data items: {any}\n", .{clName, serialized.items});
+    for (serialized.items) |value| {
+        const cast: u8 = @intFromBool(value);
+
+        write(stream, cast, clName);
+        // std.time.sleep(1 * std.time.ns_per_s);
+
+        const byte = stream.read(&singleByteBuff) catch |err| {
+            if (err == error.WouldBlock) {
+                return false;
+            } else {
+                log.info("[{s}] Error reading from stream: {any}\n", .{clName, err});
+                return false;
+            }
+        };
+        _ = byte;
+        // std.debug.print(" Received bytes num: {d} \n", .{byte});
+
+        if (singleByteBuff[0] == cast) {
+            // log.info("[{s}] RF bit equal {d} {d}\n", .{clName, singleByteBuff[0], cast});
+        } else {
+            log.info("[{s}] DF bit not equal! => {d} {d}\n", .{clName, singleByteBuff[0], cast});
+            // if we enter here during the arbitratio period, then another node is racing for the bus
+            if (count.* < 12 and singleByteBuff[0] < cast) {
+                std.debug.print("[{s}] ARBITRATION LOST, RETURNING! \n", .{clName});
+                return false;
+            }
+
+        }
+    }
+
+    return true;
 }
 
 pub fn connect(clName: []const u8, id: u12, doTransmit: bool, address: []const u8, port: u16, ignoreId: u12) !void {
@@ -129,12 +201,23 @@ pub fn connect(clName: []const u8, id: u12, doTransmit: bool, address: []const u
     defer client.close();
 }
 
+threadlocal var isDfSent: bool = false;
+
 fn read(stream: net.Stream, id: u12, clName: []const u8, count: *u32, ignoreId: u12) !void {
     var bit: bool = undefined;
 
-    const byte = try stream.reader().readByte();
+    const byte = stream.read(&singleByteBuff) catch |err| {
+        if (err == error.WouldBlock) {
+            return;
+        } else {
+            log.info("[{s}] Error reading from stream: {any}\n", .{clName, err});
+            return;
+        }
+    };
 
-    switch (byte) {
+    _ = byte;
+
+    switch (singleByteBuff[0]) {
         0 => {
             bit = false;
         },
@@ -147,7 +230,11 @@ fn read(stream: net.Stream, id: u12, clName: []const u8, count: *u32, ignoreId: 
         },
     }
 
-    log.info("[{s}] Count: {d}\n", .{clName, count.*});
+    log.info("[{s}] Count: {d} value: {}\n", .{clName, count.*, bit});
+
+    if (isDfSent) {
+        return;
+    }
 
     res = try sr.mapBitsToFrames(bit, count.*, ignoreId);
     count.* += 1;
@@ -159,7 +246,7 @@ fn read(stream: net.Stream, id: u12, clName: []const u8, count: *u32, ignoreId: 
             count.* = 0;
             if (rf != null and rf.?.*.eof == 127) {
                 // confirmation we've mapped the full remote frame
-                try sendDataFrame(stream, clName, id);
+                isDfSent = try sendDataFrame(stream, clName, id, count);
             }
         },
         .CanDataFrame => {
@@ -178,25 +265,14 @@ fn read(stream: net.Stream, id: u12, clName: []const u8, count: *u32, ignoreId: 
     }
 }
 
-pub fn sendDataFrame(stream: net.Stream, clName: []const u8, id: u12) !void {
-    log.info("\n[{s}] Sending data frame..\n", .{clName});
-    const data = sr.createDataFrame(id);
-    const serialized = try sr.serializeDataFrame(data);
-    defer serialized.deinit();
 
-    log.info("Serialized data items: {any}\n", .{serialized.items});
-    for (serialized.items) |value| {
-        const cast: u8 = @intFromBool(value);
-        write(stream, cast, clName);
-    }
-}
 
 fn write(stream: net.Stream, bit: u8, clName: []const u8) void {
     stream.writer().writeByte(bit) catch |err| {
         if (error.WouldBlock == err) {
-            write(stream, bit, clName);
+            return;
         } else {
-            log.info("Error writing to stream: {}\n", .{err});
+            log.info("[{s}] Error writing to stream: {}\n", .{clName, err});
         }
     };
 }

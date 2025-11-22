@@ -67,6 +67,7 @@ pub fn mapBitsToFrames(bit: bool, order: u32, ignoreId: u12) !bus.CanUnion {
                     dfp.?.* = createDataFrameEmpty();
                 }
                 if (identifier.items.len > 12) {
+                    std.debug.print("Clearing identifier ===========>>>>>>>>>>>> \n", .{});
                     identifier.clearRetainingCapacity();
                 }
 
@@ -153,8 +154,9 @@ pub fn serializeDataFrame(frame: bus.CanDataFrame) !std.ArrayList(bool) {
 }
 
 pub fn deserializeDataFrame(bit: bool, bitPosition: u32, id: *std.ArrayList(bool), ignoreId: u12) !void {
-    // remote frame received, send back a data frame
     var f = dfp.?.*;
+
+    _ = ignoreId;
 
     if (bitPosition == 0) {
         f.sof = 0;
@@ -169,11 +171,11 @@ pub fn deserializeDataFrame(bit: bool, bitPosition: u32, id: *std.ArrayList(bool
         }
     }
 
-    dfp.?.* = f;
-
-    if ((f.arbitration >> 1) == ignoreId) {
-        return;
-    }
+    // dfp.?.* = f;
+    //
+    // if ((f.arbitration >> 1) == ignoreId) {
+    //     return;
+    // }
 
     if (bitPosition <= bits.ControlFieldLastBit.value()) {
         //TODO actually first two bits are reserved, fix that
@@ -394,14 +396,15 @@ pub fn createRemoteFrame() bus.CanRemoteFrame {
     };
 }
 
-pub fn createDataFrame(id: u12) bus.CanDataFrame {
-    var data = [_]u8{0b11111000, 0b10};
+pub fn createDataFrame(data: []u8, id: u12) bus.CanDataFrame {
+    // var data = [_]u8{0b11111000, 0b10};
+    // _ = id;
     return bus.CanDataFrame{
         .sof = 0b0,
-        .arbitration = id << 1,
+        .arbitration = id,
         .control = 0b001000,
-        .data = &data,
-        .crc = bus.calculateCRC(&data),
+        .data = data,
+        .crc = bus.calculateCRC(data),
         .ack = 0b1,
         .eof = 0x7F,
     };

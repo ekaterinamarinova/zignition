@@ -5,22 +5,24 @@ const log = std.log;
 var Mutex = std.Thread.Mutex{};
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
+var map = std.AutoHashMap(u16, bool).init(allocator);
 
 var activeConnections = std.ArrayList(net.Server.Connection).init(allocator);
 
 pub fn main() !void {
     var buffer = std.ArrayList(bool).init(allocator);
     defer buffer.deinit();
+    defer map.deinit();
 
     //TODO handle node reconnects, currently new thread is created on reconnect
-    try start(8080, "127.0.0.1", &buffer);
+    try start(8085, "127.0.0.1", &buffer);
 }
 
 pub fn start(port: u16, address: []const u8, buff: *std.ArrayList(bool)) !void {
     // Start the virtual bus server
     const addr = try net.Address.parseIp4(address, port);
-    log.info("[main] Using address with ip: {s}, port: {d}\n", .{address, port});
-    const options = net.Address.ListenOptions {
+    log.info("[main] Using address with ip: {s}, port: {d}\n", .{ address, port });
+    const options = net.Address.ListenOptions{
         .kernel_backlog = 128,
         .reuse_address = true,
         .reuse_port = true,
@@ -41,11 +43,7 @@ pub fn start(port: u16, address: []const u8, buff: *std.ArrayList(bool)) !void {
         log.info("[main] Active connections: {any}\n", .{activeConnections.items});
         threadId += 1;
 
-        const thread = try std.Thread.spawn(
-            .{},
-            handleClient,
-            .{buff, client, threadId}
-        );
+        const thread = try std.Thread.spawn(.{}, handleClient, .{ buff, client, threadId });
 
         thread.detach();
     }
@@ -69,65 +67,140 @@ fn retry(s: *net.Server) net.Server.Connection {
     }
 }
 
-pub fn handleClient(
-    buff: *std.ArrayList(bool),
-    client: net.Server.Connection,
-    threadId: isize
-) !void {
+var waitingToAppend = false;
+
+pub fn handleClient(buff: *std.ArrayList(bool), client: net.Server.Connection, threadId: isize) !void {
     log.info("[Thread-{d}] Accepted connection from client..\n", .{threadId});
-
+    var r_byte: u8 = 0;
+   _ = buff;
     while (true) {
-        var r_byte: u8 = 0;
-
-        if (buff.*.items.len == 0) {
-            log.info("[Thread-{d}] Buffer is empty. Reading from client..\n", .{threadId});
-
-            // read a single byte and broadcast; nodes have responsibility to filter/handle/collect frames
-            r_byte = client.stream.reader().readByte() catch |err| {
-                if (err == error.EndOfStream) {
-                    log.info("[Thread-{d}] Closing connection.. \n", .{threadId});
-                    Mutex.lock();
-                    defer Mutex.unlock();
-                    for (activeConnections.items, 0..activeConnections.items.len) |conn, i| {
-                        if (conn.address.getPort() == client.address.getPort()) {
-                            conn.stream.close();
-                            _ = activeConnections.orderedRemove(i);
-                            //TODO kill thread
-                        }
+        r_byte = client.stream.reader().readByte() catch |err| {
+            if (err == error.EndOfStream) {
+                log.info("[Thread-{d}] Closing connection.. \n", .{threadId});
+                Mutex.lock();
+                defer Mutex.unlock();
+                for (activeConnections.items, 0..activeConnections.items.len) |conn, i| {
+                    if (conn.address.getPort() == client.address.getPort()) {
+                        conn.stream.close();
+                        _ = activeConnections.orderedRemove(i);
+                        //TODO kill thread
                     }
-                    return;
-                } else {
-                    return err;
                 }
-            };
+                return;
+            } else {
+                return err;
+            }
+        };
+        
+        if (r_byte > 0) {
+            Mutex.lock();
+            std.debug.print("[Thread-{d} Putting.. k-{d} v-{}]\n", .{threadId, client.address.getPort(), true});
+            try map.put(client.address.getPort(), true);
+            Mutex.unlock();
+        }
+        
+        if (r_byte == 0) {
+            Mutex.lock();
+            std.debug.print("[Thread-{d} Putting.. k-{d} v-{}]\n", .{threadId, client.address.getPort(), false});
+            try map.put(client.address.getPort(), false);
+            Mutex.unlock();
+        }
+        
+        log.info("Thread-{d} Added to buffer...\n", .{threadId});
+
+        // std.time.sleep(1 * std.time.ns_per_ms);
+
+        Mutex.lock();
+        var iterator = map.valueIterator();
+        Mutex.unlock();
+        var eval: u8 = 1;
+        log.info("[Thread-{d}] Map count {d}\n", .{threadId, map.count()});
+        if (map.count() > 1) {
+            log.info("[Thread-{d}] Map count again {d}\n", .{threadId, map.count()});
 
             Mutex.lock();
-            if (r_byte == 0) {
-                log.info("[Thread-{d}] Read dominant bit, adding to buffer. \n", .{threadId});
-                try buff.*.append(false);
-            }
-            
-            if (r_byte > 0) {
-                log.info("[Thread-{d}] Read byte from client: {b}\n", .{threadId, r_byte});
-                try buff.*.append(true);
+            while (iterator.next()) |val| {
+                const v = @intFromBool(val.*);
+                eval &= v;
+                log.info("[Thread-{d}] Eval is {d} \n", .{threadId, eval});
             }
 
             for (activeConnections.items) |conn| {
-                if (conn.address.getPort() != client.address.getPort()) {
-                    log.info("[Thread-{d}] Broadcasting to: {any}\n", .{threadId, conn.address});
-                    for (buff.items) |i| {
-                        if (i == true) {
-                            try conn.stream.writer().writeByte(1);
-                        } else {
-                            try conn.stream.writer().writeByte(0);
-                        }
-                    }
+                log.info("[Thread-{d}] Broadcasting to: {any} value {d} \n", .{ threadId, conn.address, eval });
+
+                if (eval != 0 and eval != 1) {
+                    return error.WrongValue;
                 }
+
+                try conn.stream.writer().writeByte(eval);
             }
-            buff.clearRetainingCapacity();
             Mutex.unlock();
+        } else if (map.count() == 1) {} {
+            Mutex.lock();
+            defer Mutex.unlock();
+           for (activeConnections.items) |conn| {
+                log.info("[Thread-{d}] Broadcasting to: {any}\n", .{ threadId, conn.address });
+                if (r_byte == 0) {
+                    try conn.stream.writer().writeByte(0);
+                } else {
+                    try conn.stream.writer().writeByte(1);
+                }
+           }
         }
 
+        Mutex.lock();
+        defer Mutex.unlock();
+        log.info("[Thread-{d}] Clearing map.. \n", .{threadId});
+        map.clearRetainingCapacity();
+    }
+
+       // try append(client, buff, r_byte);
+}
+
+
+fn append(client: net.Server.Connection, buff: *std.ArrayList(bool), byte: u8, threadId: isize) !void {
+    if (Mutex.tryLock()) {
+        if (byte == 0) {
+            log.info("[Thread-{d}] Read dominant bit, adding to buffer. \n", .{threadId});
+            try buff.*.append(false);
+            try map.put(client.address.getPort(), false);
+        }
+
+        if (byte > 0) {
+            log.info("[Thread-{d}] Read byte from client: {b}\n", .{ threadId, byte });
+            try buff.*.append(true);
+            try map.put(client.address.getPort(), true);
+        }
+
+        for (activeConnections.items) |conn| {
+            log.info("[Thread-{d}] Broadcasting to: {any}\n", .{ threadId, conn.address });
+            if (waitingToAppend and buff.items.len < 2 ) {
+                // Mutex.unlock();
+                // let the other thread append
+                break;
+            }
+
+            if (waitingToAppend and buff.items.len >= 2) {
+                waitingToAppend = false;
+                
+            }
+
+            for (buff.items) |i| {
+
+                if (i == true) {
+                    try conn.stream.writer().writeByte(1);
+                } else {
+                    try conn.stream.writer().writeByte(0);
+                }
+            }
+        }
+        // buff.clearRetainingCapacity();
+        Mutex.unlock();
+    } else {
+        std.debug.print("[Thread-{d}] Failed to acq mutex..\n", .{threadId});
+        waitingToAppend = true;
+        std.time.sleep(1 * std.time.ns_per_ms);
+        append(buff, byte);
     }
 }
 
@@ -139,7 +212,7 @@ pub const CanNode = struct {
     receiveErrorCount: u8,
 
     pub fn init(isErrorActive: bool, isErrorPassive: bool, isBusOff: bool, transmitErrorCount: u8, receiveErrorCount: u8) CanNode {
-        const node = CanNode {
+        const node = CanNode{
             .isErrorActive = isErrorActive,
             .isErrorPassive = isErrorPassive,
             .isBusOff = isBusOff,
@@ -193,7 +266,7 @@ pub const CanDataFrame = struct {
     // 7 recessive bits (1)
     eof: u7,
 
-    pub fn init(sof: u8, arbitration: u16, control: u8, data: []u8, crc: u16, ack: u8, eof: u8) CanDataFrame {
+    pub fn init(sof: u1, arbitration: u12, control: u6, data: []u8, crc: u16, ack: u2, eof: u7) CanDataFrame {
         const frame = CanDataFrame{
             .sof = sof,
             .arbitration = arbitration,
@@ -206,7 +279,6 @@ pub const CanDataFrame = struct {
 
         return frame;
     }
-
 };
 
 pub const CanRemoteFrame = struct {
@@ -264,16 +336,6 @@ pub const CanInterframeSpacing = struct {
     }
 };
 
-const Tag = enum {
-    CanDataFrame,
-    CanErrorFrame,
-    CanRemoteFrame,
-    CanInterframeSpacing
-};
+const Tag = enum { CanDataFrame, CanErrorFrame, CanRemoteFrame, CanInterframeSpacing };
 
-pub const CanUnion = union(Tag) {
-    CanDataFrame: *CanDataFrame,
-    CanErrorFrame: *CanErrorFrame,
-    CanRemoteFrame: *CanRemoteFrame,
-    CanInterframeSpacing: *CanInterframeSpacing
-};
+pub const CanUnion = union(Tag) { CanDataFrame: *CanDataFrame, CanErrorFrame: *CanErrorFrame, CanRemoteFrame: *CanRemoteFrame, CanInterframeSpacing: *CanInterframeSpacing };
